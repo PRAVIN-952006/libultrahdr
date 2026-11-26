@@ -9,8 +9,12 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
+#include <sstream>
+#include <string_view>
 
 #include "ultrahdr/gainmapmath.h"
 #include "ultrahdr/gainmapmetadata.h"
@@ -18,36 +22,39 @@
 
 namespace ultrahdr {
 
+static uhdr_error_info_t makeError(uhdr_codec_err_t code, std::string_view message) {
+  uhdr_error_info_t status{};
+  status.error_code = code;
+  status.has_detail = 1;
+  const std::string_view clipped = message.substr(0, sizeof(status.detail) - 1);
+  std::copy(clipped.begin(), clipped.end(), std::begin(status.detail));
+  return status;
+}
+
 void streamWriteU8(std::vector<uint8_t> &data, uint8_t value) { data.push_back(value); }
 
 void streamWriteU16(std::vector<uint8_t> &data, uint16_t value) {
-  data.push_back((value >> 8) & 0xff);
-  data.push_back(value & 0xff);
+  data.push_back(static_cast<uint8_t>((value >> 8) & 0xffu));
+  data.push_back(static_cast<uint8_t>(value & 0xffu));
 }
 
 void streamWriteU32(std::vector<uint8_t> &data, uint32_t value) {
-  data.push_back((value >> 24) & 0xff);
-  data.push_back((value >> 16) & 0xff);
-  data.push_back((value >> 8) & 0xff);
-  data.push_back(value & 0xff);
+  data.push_back(static_cast<uint8_t>((value >> 24) & 0xffu));
+  data.push_back(static_cast<uint8_t>((value >> 16) & 0xffu));
+  data.push_back(static_cast<uint8_t>((value >> 8) & 0xffu));
+  data.push_back(static_cast<uint8_t>(value & 0xffu));
 }
 
 void streamWriteS32(std::vector<uint8_t> &data, int32_t value) {
-  data.push_back((value >> 24) & 0xff);
-  data.push_back((value >> 16) & 0xff);
-  data.push_back((value >> 8) & 0xff);
-  data.push_back(value & 0xff);
+  streamWriteU32(data, static_cast<uint32_t>(value));
 }
 
 uhdr_error_info_t streamReadU8(const std::vector<uint8_t> &data, uint8_t &value, size_t &pos) {
   if (pos >= data.size()) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_MEM_ERROR;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "attempting to read byte at position %d when the buffer size is %d", (int)pos,
-             (int)data.size());
-    return status;
+    std::stringstream ss;
+    ss << "attempting to read byte at position " << pos << " when the buffer size is "
+       << data.size();
+    return makeError(UHDR_CODEC_MEM_ERROR, ss.str());
   }
   value = data[pos++];
   return g_no_error;
@@ -55,46 +62,33 @@ uhdr_error_info_t streamReadU8(const std::vector<uint8_t> &data, uint8_t &value,
 
 uhdr_error_info_t streamReadU16(const std::vector<uint8_t> &data, uint16_t &value, size_t &pos) {
   if (pos > data.size() || data.size() - pos < 2) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_MEM_ERROR;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "attempting to read 2 bytes from position %d when the buffer size is %d", (int)pos,
-             (int)data.size());
-    return status;
+    std::stringstream ss;
+    ss << "attempting to read 2 bytes from position " << pos << " when the buffer size is "
+       << data.size();
+    return makeError(UHDR_CODEC_MEM_ERROR, ss.str());
   }
-  value = (data[pos] << 8 | data[pos + 1]);
+  value = static_cast<uint16_t>((static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1]);
   pos += 2;
   return g_no_error;
 }
 
 uhdr_error_info_t streamReadU32(const std::vector<uint8_t> &data, uint32_t &value, size_t &pos) {
   if (pos > data.size() || data.size() - pos < 4) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_MEM_ERROR;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "attempting to read 4 bytes from position %d when the buffer size is %d", (int)pos,
-             (int)data.size());
-    return status;
+    std::stringstream ss;
+    ss << "attempting to read 4 bytes from position " << pos << " when the buffer size is "
+       << data.size();
+    return makeError(UHDR_CODEC_MEM_ERROR, ss.str());
   }
-  value = (data[pos] << 24 | data[pos + 1] << 16 | data[pos + 2] << 8 | data[pos + 3]);
+  value = (static_cast<uint32_t>(data[pos]) << 24) | (static_cast<uint32_t>(data[pos + 1]) << 16) |
+          (static_cast<uint32_t>(data[pos + 2]) << 8) | static_cast<uint32_t>(data[pos + 3]);
   pos += 4;
   return g_no_error;
 }
 
 uhdr_error_info_t streamReadS32(const std::vector<uint8_t> &data, int32_t &value, size_t &pos) {
-  if (pos > data.size() || data.size() - pos < 4) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_MEM_ERROR;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "attempting to read 4 bytes from position %d when the buffer size is %d", (int)pos,
-             (int)data.size());
-    return status;
-  }
-  value = (data[pos] << 24 | data[pos + 1] << 16 | data[pos + 2] << 8 | data[pos + 3]);
-  pos += 4;
+  uint32_t u = 0;
+  UHDR_ERR_CHECK(streamReadU32(data, u, pos))
+  value = static_cast<int32_t>(u);
   return g_no_error;
 }
 
@@ -114,25 +108,17 @@ bool uhdr_gainmap_metadata_frac::allChannelsIdentical() const {
 uhdr_error_info_t uhdr_gainmap_metadata_frac::encodeGainmapMetadata(
     const uhdr_gainmap_metadata_frac *in_metadata, std::vector<uint8_t> &out_data) {
   if (in_metadata == nullptr) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_INVALID_PARAM;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "received nullptr for gain map metadata descriptor");
-    return status;
+    return makeError(UHDR_CODEC_INVALID_PARAM,
+                     "received nullptr for gain map metadata descriptor");
   }
 
   if (in_metadata->backwardDirection) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_UNSUPPORTED_FEATURE;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail, "backward direction is not supported");
-    return status;
+    return makeError(UHDR_CODEC_UNSUPPORTED_FEATURE, "backward direction is not supported");
   }
 
   uint8_t flags = 0u;
   // Version 0 defines only the channel-count and base-color-space flags.
-  const uint8_t channelCount = in_metadata->allChannelsIdentical() ? 1u : 3u;
+  const size_t channelCount = in_metadata->allChannelsIdentical() ? 1u : 3u;
 
   if (channelCount == 3) {
     flags |= kIsMultiChannelMask;
@@ -143,23 +129,16 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::encodeGainmapMetadata(
 
   // Validate that no denominator is zero before serialization
   if (in_metadata->baseHdrHeadroomD == 0 || in_metadata->alternateHdrHeadroomD == 0) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_INVALID_PARAM;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "gain map metadata headroom denominator cannot be 0");
-    return status;
+    return makeError(UHDR_CODEC_INVALID_PARAM,
+                     "gain map metadata headroom denominator cannot be 0");
   }
-  for (int c = 0; c < channelCount; ++c) {
+  for (size_t c = 0; c < channelCount; ++c) {
     if (in_metadata->gainMapMinD[c] == 0 || in_metadata->gainMapMaxD[c] == 0 ||
         in_metadata->gainMapGammaD[c] == 0 || in_metadata->baseOffsetD[c] == 0 ||
         in_metadata->alternateOffsetD[c] == 0) {
-      uhdr_error_info_t status;
-      status.error_code = UHDR_CODEC_INVALID_PARAM;
-      status.has_detail = 1;
-      snprintf(status.detail, sizeof status.detail,
-               "gain map metadata channel %d denominator cannot be 0", c);
-      return status;
+      std::stringstream ss;
+      ss << "gain map metadata channel " << c << " denominator cannot be 0";
+      return makeError(UHDR_CODEC_INVALID_PARAM, ss.str());
     }
   }
 
@@ -177,7 +156,7 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::encodeGainmapMetadata(
   streamWriteU32(out_data, in_metadata->baseHdrHeadroomD);
   streamWriteU32(out_data, in_metadata->alternateHdrHeadroomN);
   streamWriteU32(out_data, in_metadata->alternateHdrHeadroomD);
-  for (int c = 0; c < channelCount; ++c) {
+  for (size_t c = 0; c < channelCount; ++c) {
     streamWriteS32(out_data, in_metadata->gainMapMinN[c]);
     streamWriteU32(out_data, in_metadata->gainMapMinD[c]);
     streamWriteS32(out_data, in_metadata->gainMapMaxN[c]);
@@ -196,12 +175,8 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::encodeGainmapMetadata(
 uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
     const std::vector<uint8_t> &in_data, uhdr_gainmap_metadata_frac *out_metadata) {
   if (out_metadata == nullptr) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_INVALID_PARAM;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "received nullptr for gain map metadata descriptor");
-    return status;
+    return makeError(UHDR_CODEC_INVALID_PARAM,
+                     "received nullptr for gain map metadata descriptor");
   }
 
   size_t pos = 0;
@@ -209,26 +184,15 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
   uint16_t writer_version = 0xffff;
   UHDR_ERR_CHECK(streamReadU16(in_data, min_version, pos))
   if (min_version != 0) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_UNSUPPORTED_FEATURE;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "received unexpected minimum version %d, expected 0", min_version);
-    return status;
+    std::stringstream ss;
+    ss << "received unexpected minimum version " << min_version << ", expected 0";
+    return makeError(UHDR_CODEC_UNSUPPORTED_FEATURE, ss.str());
   }
   UHDR_ERR_CHECK(streamReadU16(in_data, writer_version, pos))
 
   uint8_t flags = 0xff;
   UHDR_ERR_CHECK(streamReadU8(in_data, flags, pos))
-  uint8_t channelCount = ((flags & kIsMultiChannelMask) != 0) * 2 + 1;
-  if (!(channelCount == 1 || channelCount == 3)) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_UNSUPPORTED_FEATURE;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "received unexpected channel count %d, expects one of {1, 3}", channelCount);
-    return status;
-  }
+  const size_t channelCount = ((flags & kIsMultiChannelMask) != 0) ? 3u : 1u;
   out_metadata->useBaseColorSpace = (flags & kUseBaseColorSpaceMask) != 0;
   out_metadata->backwardDirection = (flags & 4) != 0;
   const bool useCommonDenominator = (flags & 8) != 0;
@@ -237,12 +201,8 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
     uint32_t commonDenominator = 1u;
     UHDR_ERR_CHECK(streamReadU32(in_data, commonDenominator, pos))
     if (commonDenominator == 0) {
-      uhdr_error_info_t status;
-      status.error_code = UHDR_CODEC_INVALID_PARAM;
-      status.has_detail = 1;
-      snprintf(status.detail, sizeof status.detail,
-               "decoded gain map common denominator cannot be 0");
-      return status;
+      return makeError(UHDR_CODEC_INVALID_PARAM,
+                       "decoded gain map common denominator cannot be 0");
     }
 
     UHDR_ERR_CHECK(streamReadU32(in_data, out_metadata->baseHdrHeadroomN, pos))
@@ -250,7 +210,7 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
     UHDR_ERR_CHECK(streamReadU32(in_data, out_metadata->alternateHdrHeadroomN, pos))
     out_metadata->alternateHdrHeadroomD = commonDenominator;
 
-    for (int c = 0; c < channelCount; ++c) {
+    for (size_t c = 0; c < channelCount; ++c) {
       UHDR_ERR_CHECK(streamReadS32(in_data, out_metadata->gainMapMinN[c], pos))
       out_metadata->gainMapMinD[c] = commonDenominator;
       UHDR_ERR_CHECK(streamReadS32(in_data, out_metadata->gainMapMaxN[c], pos))
@@ -267,7 +227,7 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
     UHDR_ERR_CHECK(streamReadU32(in_data, out_metadata->baseHdrHeadroomD, pos))
     UHDR_ERR_CHECK(streamReadU32(in_data, out_metadata->alternateHdrHeadroomN, pos))
     UHDR_ERR_CHECK(streamReadU32(in_data, out_metadata->alternateHdrHeadroomD, pos))
-    for (int c = 0; c < channelCount; ++c) {
+    for (size_t c = 0; c < channelCount; ++c) {
       UHDR_ERR_CHECK(streamReadS32(in_data, out_metadata->gainMapMinN[c], pos))
       UHDR_ERR_CHECK(streamReadU32(in_data, out_metadata->gainMapMinD[c], pos))
       UHDR_ERR_CHECK(streamReadS32(in_data, out_metadata->gainMapMaxN[c], pos))
@@ -284,28 +244,21 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
   // Applies to both layouts: a zero denominator yields NaN / SIGFPE once the
   // rationals are converted to float, so reject it at parse time.
   if (out_metadata->baseHdrHeadroomD == 0 || out_metadata->alternateHdrHeadroomD == 0) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_INVALID_PARAM;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "decoded gain map headroom denominator cannot be 0");
-    return status;
+    return makeError(UHDR_CODEC_INVALID_PARAM,
+                     "decoded gain map headroom denominator cannot be 0");
   }
-  for (int c = 0; c < channelCount; ++c) {
+  for (size_t c = 0; c < channelCount; ++c) {
     if (out_metadata->gainMapMinD[c] == 0 || out_metadata->gainMapMaxD[c] == 0 ||
         out_metadata->gainMapGammaD[c] == 0 || out_metadata->baseOffsetD[c] == 0 ||
         out_metadata->alternateOffsetD[c] == 0) {
-      uhdr_error_info_t status;
-      status.error_code = UHDR_CODEC_INVALID_PARAM;
-      status.has_detail = 1;
-      snprintf(status.detail, sizeof status.detail,
-               "decoded gain map channel %d denominator cannot be 0", c);
-      return status;
+      std::stringstream ss;
+      ss << "decoded gain map channel " << c << " denominator cannot be 0";
+      return makeError(UHDR_CODEC_INVALID_PARAM, ss.str());
     }
   }
 
   // Fill the remaining values by copying those from the first channel.
-  for (int c = channelCount; c < 3; ++c) {
+  for (size_t c = channelCount; c < 3; ++c) {
     out_metadata->gainMapMinN[c] = out_metadata->gainMapMinN[0];
     out_metadata->gainMapMinD[c] = out_metadata->gainMapMinD[0];
     out_metadata->gainMapMaxN[c] = out_metadata->gainMapMaxN[0];
@@ -321,37 +274,26 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::decodeGainmapMetadata(
   return g_no_error;
 }
 
-#define UHDR_CHECK_NON_ZERO(x, message)                                                            \
-  if (x == 0) {                                                                                    \
-    uhdr_error_info_t status;                                                                      \
-    status.error_code = UHDR_CODEC_INVALID_PARAM;                                                  \
-    status.has_detail = 1;                                                                         \
-    snprintf(status.detail, sizeof status.detail, "received 0 (bad value) for field %s", message); \
-    return status;                                                                                 \
+#define UHDR_CHECK_NON_ZERO(x, message)                                                \
+  if ((x) == 0) {                                                                      \
+    return makeError(UHDR_CODEC_INVALID_PARAM,                                         \
+                     std::string("received 0 (bad value) for field ") + (message));    \
   }
 
-static uhdr_error_info_t invalidGainMapMetadata(const char *detail) {
-  uhdr_error_info_t status;
-  status.error_code = UHDR_CODEC_INVALID_PARAM;
-  status.has_detail = 1;
-  snprintf(status.detail, sizeof status.detail, "%s", detail);
-  return status;
+static uhdr_error_info_t invalidGainMapMetadata(std::string_view detail) {
+  return makeError(UHDR_CODEC_INVALID_PARAM, detail);
 }
 
 uhdr_error_info_t uhdr_gainmap_metadata_frac::gainmapMetadataFractionToFloat(
     const uhdr_gainmap_metadata_frac *from, uhdr_gainmap_metadata_ext_t *to) {
   if (from == nullptr || to == nullptr) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_INVALID_PARAM;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "received nullptr for gain map metadata descriptor");
-    return status;
+    return makeError(UHDR_CODEC_INVALID_PARAM,
+                     "received nullptr for gain map metadata descriptor");
   }
 
   UHDR_CHECK_NON_ZERO(from->baseHdrHeadroomD, "baseHdrHeadroom denominator");
   UHDR_CHECK_NON_ZERO(from->alternateHdrHeadroomD, "alternateHdrHeadroom denominator");
-  for (int i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < 3; ++i) {
     UHDR_CHECK_NON_ZERO(from->gainMapMaxD[i], "gainMapMax denominator");
     UHDR_CHECK_NON_ZERO(from->gainMapGammaD[i], "gainMapGamma denominator");
     UHDR_CHECK_NON_ZERO(from->gainMapMinD[i], "gainMapMin denominator");
@@ -366,26 +308,35 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::gainmapMetadataFractionToFloat(
 
   // jpeg supports only 8 bits per component, applying gainmap in inverse direction is unexpected
   if (from->backwardDirection) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_UNSUPPORTED_FEATURE;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail, "hdr intent as base rendition is not supported");
-    return status;
+    return makeError(UHDR_CODEC_UNSUPPORTED_FEATURE,
+                     "hdr intent as base rendition is not supported");
   }
 
   to->version = kJpegrVersion;
-  for (int i = 0; i < 3; i++) {
-    to->max_content_boost[i] = exp2((float)from->gainMapMaxN[i] / from->gainMapMaxD[i]);
-    to->min_content_boost[i] = exp2((float)from->gainMapMinN[i] / from->gainMapMinD[i]);
+  std::array<float, 3> max_content_boost{};
+  std::array<float, 3> min_content_boost{};
+  std::array<float, 3> gamma{};
+  std::array<float, 3> offset_sdr{};
+  std::array<float, 3> offset_hdr{};
+  for (size_t i = 0; i < 3; i++) {
+    max_content_boost[i] = exp2(static_cast<float>(from->gainMapMaxN[i]) / from->gainMapMaxD[i]);
+    min_content_boost[i] = exp2(static_cast<float>(from->gainMapMinN[i]) / from->gainMapMinD[i]);
 
-    to->gamma[i] = (float)from->gainMapGammaN[i] / from->gainMapGammaD[i];
+    gamma[i] = static_cast<float>(from->gainMapGammaN[i]) / from->gainMapGammaD[i];
 
     // BaseRenditionIsHDR is false
-    to->offset_sdr[i] = (float)from->baseOffsetN[i] / from->baseOffsetD[i];
-    to->offset_hdr[i] = (float)from->alternateOffsetN[i] / from->alternateOffsetD[i];
+    offset_sdr[i] = static_cast<float>(from->baseOffsetN[i]) / from->baseOffsetD[i];
+    offset_hdr[i] = static_cast<float>(from->alternateOffsetN[i]) / from->alternateOffsetD[i];
   }
-  to->hdr_capacity_max = exp2((float)from->alternateHdrHeadroomN / from->alternateHdrHeadroomD);
-  to->hdr_capacity_min = exp2((float)from->baseHdrHeadroomN / from->baseHdrHeadroomD);
+  std::copy(max_content_boost.begin(), max_content_boost.end(), std::begin(to->max_content_boost));
+  std::copy(min_content_boost.begin(), min_content_boost.end(), std::begin(to->min_content_boost));
+  std::copy(gamma.begin(), gamma.end(), std::begin(to->gamma));
+  std::copy(offset_sdr.begin(), offset_sdr.end(), std::begin(to->offset_sdr));
+  std::copy(offset_hdr.begin(), offset_hdr.end(), std::begin(to->offset_hdr));
+
+  to->hdr_capacity_max =
+      exp2(static_cast<float>(from->alternateHdrHeadroomN) / from->alternateHdrHeadroomD);
+  to->hdr_capacity_min = exp2(static_cast<float>(from->baseHdrHeadroomN) / from->baseHdrHeadroomD);
   to->use_base_cg = from->useBaseColorSpace;
 
   return uhdr_validate_gainmap_metadata_descriptor(to);
@@ -394,77 +345,77 @@ uhdr_error_info_t uhdr_gainmap_metadata_frac::gainmapMetadataFractionToFloat(
 uhdr_error_info_t uhdr_gainmap_metadata_frac::gainmapMetadataFloatToFraction(
     const uhdr_gainmap_metadata_ext_t *from, uhdr_gainmap_metadata_frac *to) {
   if (from == nullptr || to == nullptr) {
-    uhdr_error_info_t status;
-    status.error_code = UHDR_CODEC_INVALID_PARAM;
-    status.has_detail = 1;
-    snprintf(status.detail, sizeof status.detail,
-             "received nullptr for gain map metadata descriptor");
-    return status;
+    return makeError(UHDR_CODEC_INVALID_PARAM,
+                     "received nullptr for gain map metadata descriptor");
   }
 
   to->backwardDirection = false;
   to->useBaseColorSpace = from->use_base_cg;
 
-#define CONVERT_FLT_TO_UNSIGNED_FRACTION(flt, numerator, denominator)                          \
-  if (!floatToUnsignedFraction(flt, numerator, denominator)) {                                 \
-    uhdr_error_info_t status;                                                                  \
-    status.error_code = UHDR_CODEC_INVALID_PARAM;                                              \
-    status.has_detail = 1;                                                                     \
-    snprintf(status.detail, sizeof status.detail,                                              \
-             "encountered error while representing float %f as a rational number (p/q form) ", \
-             flt);                                                                             \
-    return status;                                                                             \
-  }
+  auto convertUnsigned = [](float flt, uint32_t *numerator,
+                            uint32_t *denominator) -> uhdr_error_info_t {
+    if (!floatToUnsignedFraction(flt, numerator, denominator)) {
+      std::stringstream ss;
+      ss << "encountered error while representing float " << flt
+         << " as a rational number (p/q form) ";
+      return makeError(UHDR_CODEC_INVALID_PARAM, ss.str());
+    }
+    return g_no_error;
+  };
 
-#define CONVERT_FLT_TO_SIGNED_FRACTION(flt, numerator, denominator)                            \
-  if (!floatToSignedFraction(flt, numerator, denominator)) {                                   \
-    uhdr_error_info_t status;                                                                  \
-    status.error_code = UHDR_CODEC_INVALID_PARAM;                                              \
-    status.has_detail = 1;                                                                     \
-    snprintf(status.detail, sizeof status.detail,                                              \
-             "encountered error while representing float %f as a rational number (p/q form) ", \
-             flt);                                                                             \
-    return status;                                                                             \
-  }
+  auto convertSigned = [](float flt, int32_t *numerator,
+                          uint32_t *denominator) -> uhdr_error_info_t {
+    if (!floatToSignedFraction(flt, numerator, denominator)) {
+      std::stringstream ss;
+      ss << "encountered error while representing float " << flt
+         << " as a rational number (p/q form) ";
+      return makeError(UHDR_CODEC_INVALID_PARAM, ss.str());
+    }
+    return g_no_error;
+  };
+
+  std::array<float, 3> max_content_boost{};
+  std::array<float, 3> min_content_boost{};
+  std::array<float, 3> gamma{};
+  std::array<float, 3> offset_sdr{};
+  std::array<float, 3> offset_hdr{};
+  std::copy(std::begin(from->max_content_boost), std::end(from->max_content_boost),
+            max_content_boost.begin());
+  std::copy(std::begin(from->min_content_boost), std::end(from->min_content_boost),
+            min_content_boost.begin());
+  std::copy(std::begin(from->gamma), std::end(from->gamma), gamma.begin());
+  std::copy(std::begin(from->offset_sdr), std::end(from->offset_sdr), offset_sdr.begin());
+  std::copy(std::begin(from->offset_hdr), std::end(from->offset_hdr), offset_hdr.begin());
 
   bool isSingleChannel = from->are_all_channels_identical();
-  for (int i = 0; i < (isSingleChannel ? 1 : 3); i++) {
-    CONVERT_FLT_TO_SIGNED_FRACTION(log2(from->max_content_boost[i]), &to->gainMapMaxN[i],
-                                   &to->gainMapMaxD[i])
-
-    CONVERT_FLT_TO_SIGNED_FRACTION(log2(from->min_content_boost[i]), &to->gainMapMinN[i],
-                                   &to->gainMapMinD[i]);
-
-    CONVERT_FLT_TO_UNSIGNED_FRACTION(from->gamma[i], &to->gainMapGammaN[i], &to->gainMapGammaD[i]);
-
-    CONVERT_FLT_TO_SIGNED_FRACTION(from->offset_sdr[i], &to->baseOffsetN[i], &to->baseOffsetD[i]);
-
-    CONVERT_FLT_TO_SIGNED_FRACTION(from->offset_hdr[i], &to->alternateOffsetN[i],
-                                   &to->alternateOffsetD[i]);
+  for (size_t i = 0; i < (isSingleChannel ? 1u : 3u); i++) {
+    UHDR_ERR_CHECK(
+        convertSigned(log2(max_content_boost[i]), &to->gainMapMaxN[i], &to->gainMapMaxD[i]))
+    UHDR_ERR_CHECK(
+        convertSigned(log2(min_content_boost[i]), &to->gainMapMinN[i], &to->gainMapMinD[i]))
+    UHDR_ERR_CHECK(convertUnsigned(gamma[i], &to->gainMapGammaN[i], &to->gainMapGammaD[i]))
+    UHDR_ERR_CHECK(convertSigned(offset_sdr[i], &to->baseOffsetN[i], &to->baseOffsetD[i]))
+    UHDR_ERR_CHECK(
+        convertSigned(offset_hdr[i], &to->alternateOffsetN[i], &to->alternateOffsetD[i]))
   }
 
   if (isSingleChannel) {
-    to->gainMapMaxN[2] = to->gainMapMaxN[1] = to->gainMapMaxN[0];
-    to->gainMapMaxD[2] = to->gainMapMaxD[1] = to->gainMapMaxD[0];
-
-    to->gainMapMinN[2] = to->gainMapMinN[1] = to->gainMapMinN[0];
-    to->gainMapMinD[2] = to->gainMapMinD[1] = to->gainMapMinD[0];
-
-    to->gainMapGammaN[2] = to->gainMapGammaN[1] = to->gainMapGammaN[0];
-    to->gainMapGammaD[2] = to->gainMapGammaD[1] = to->gainMapGammaD[0];
-
-    to->baseOffsetN[2] = to->baseOffsetN[1] = to->baseOffsetN[0];
-    to->baseOffsetD[2] = to->baseOffsetD[1] = to->baseOffsetD[0];
-
-    to->alternateOffsetN[2] = to->alternateOffsetN[1] = to->alternateOffsetN[0];
-    to->alternateOffsetD[2] = to->alternateOffsetD[1] = to->alternateOffsetD[0];
+    to->gainMapMaxN.fill(to->gainMapMaxN[0]);
+    to->gainMapMaxD.fill(to->gainMapMaxD[0]);
+    to->gainMapMinN.fill(to->gainMapMinN[0]);
+    to->gainMapMinD.fill(to->gainMapMinD[0]);
+    to->gainMapGammaN.fill(to->gainMapGammaN[0]);
+    to->gainMapGammaD.fill(to->gainMapGammaD[0]);
+    to->baseOffsetN.fill(to->baseOffsetN[0]);
+    to->baseOffsetD.fill(to->baseOffsetD[0]);
+    to->alternateOffsetN.fill(to->alternateOffsetN[0]);
+    to->alternateOffsetD.fill(to->alternateOffsetD[0]);
   }
 
-  CONVERT_FLT_TO_UNSIGNED_FRACTION(log2(from->hdr_capacity_min), &to->baseHdrHeadroomN,
-                                   &to->baseHdrHeadroomD);
-
-  CONVERT_FLT_TO_UNSIGNED_FRACTION(log2(from->hdr_capacity_max), &to->alternateHdrHeadroomN,
-                                   &to->alternateHdrHeadroomD);
+  UHDR_ERR_CHECK(
+      convertUnsigned(log2(from->hdr_capacity_min), &to->baseHdrHeadroomN, &to->baseHdrHeadroomD))
+  UHDR_ERR_CHECK(convertUnsigned(log2(from->hdr_capacity_max), &to->alternateHdrHeadroomN,
+                                 &to->alternateHdrHeadroomD))
 
   return g_no_error;
 }

@@ -62,30 +62,38 @@ struct uhdr_gainmap_metadata_frac {
     ALOGD("GAIN MAP METADATA: \n");
     ALOGD("min numerator:                       %d, %d, %d\n", gainMapMinN[0], gainMapMinN[1],
           gainMapMinN[2]);
-    ALOGD("min denominator:                     %d, %d, %d\n", gainMapMinD[0], gainMapMinD[1],
+    ALOGD("min denominator:                     %u, %u, %u\n", gainMapMinD[0], gainMapMinD[1],
           gainMapMinD[2]);
     ALOGD("max numerator:                       %d, %d, %d\n", gainMapMaxN[0], gainMapMaxN[1],
           gainMapMaxN[2]);
-    ALOGD("max denominator:                     %d, %d, %d\n", gainMapMaxD[0], gainMapMaxD[1],
+    ALOGD("max denominator:                     %u, %u, %u\n", gainMapMaxD[0], gainMapMaxD[1],
           gainMapMaxD[2]);
-    ALOGD("gamma numerator:                     %d, %d, %d\n", gainMapGammaN[0], gainMapGammaN[1],
+    ALOGD("gamma numerator:                     %u, %u, %u\n", gainMapGammaN[0], gainMapGammaN[1],
           gainMapGammaN[2]);
-    ALOGD("gamma denominator:                   %d, %d, %d\n", gainMapGammaD[0], gainMapGammaD[1],
+    ALOGD("gamma denominator:                   %u, %u, %u\n", gainMapGammaD[0], gainMapGammaD[1],
           gainMapGammaD[2]);
     ALOGD("SDR offset numerator:                %d, %d, %d\n", baseOffsetN[0], baseOffsetN[1],
           baseOffsetN[2]);
-    ALOGD("SDR offset denominator:              %d, %d, %d\n", baseOffsetD[0], baseOffsetD[1],
+    ALOGD("SDR offset denominator:              %u, %u, %u\n", baseOffsetD[0], baseOffsetD[1],
           baseOffsetD[2]);
     ALOGD("HDR offset numerator:                %d, %d, %d\n", alternateOffsetN[0],
           alternateOffsetN[1], alternateOffsetN[2]);
-    ALOGD("HDR offset denominator:              %d, %d, %d\n", alternateOffsetD[0],
+    ALOGD("HDR offset denominator:              %u, %u, %u\n", alternateOffsetD[0],
           alternateOffsetD[1], alternateOffsetD[2]);
-    ALOGD("base HDR head room numerator:        %d\n", baseHdrHeadroomN);
-    ALOGD("base HDR head room denominator:      %d\n", baseHdrHeadroomD);
-    ALOGD("alternate HDR head room numerator:   %d\n", alternateHdrHeadroomN);
-    ALOGD("alternate HDR head room denominator: %d\n", alternateHdrHeadroomD);
-    ALOGD("backwardDirection:                   %s\n", backwardDirection ? "true" : "false");
-    ALOGD("use base color space:                %s\n", useBaseColorSpace ? "true" : "false");
+    ALOGD("base HDR head room numerator:        %u\n", baseHdrHeadroomN);
+    ALOGD("base HDR head room denominator:      %u\n", baseHdrHeadroomD);
+    ALOGD("alternate HDR head room numerator:   %u\n", alternateHdrHeadroomN);
+    ALOGD("alternate HDR head room denominator: %u\n", alternateHdrHeadroomD);
+    if (backwardDirection) {
+      ALOGD("backwardDirection:                   true\n");
+    } else {
+      ALOGD("backwardDirection:                   false\n");
+    }
+    if (useBaseColorSpace) {
+      ALOGD("use base color space:                true\n");
+    } else {
+      ALOGD("use base color space:                false\n");
+    }
   }
 };
 

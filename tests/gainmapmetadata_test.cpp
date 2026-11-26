@@ -557,4 +557,46 @@ TEST_F(GainMapMetadataTest, EncodeLeavesOutputUntouchedOnValidationFailure) {
   EXPECT_TRUE(data.empty()) << "encoder wrote " << data.size() << " byte(s) before failing";
 }
 
+TEST_F(GainMapMetadataTest, RejectsAllTruncatedPrefixes) {
+  for (size_t len = 0; len < kThreeMixedDenominators.size(); ++len) {
+    std::vector<uint8_t> prefix(
+        kThreeMixedDenominators.begin(),
+        kThreeMixedDenominators.begin() + static_cast<std::ptrdiff_t>(len));
+    uhdr_gainmap_metadata_frac decoded;
+    EXPECT_NE(uhdr_gainmap_metadata_frac::decodeGainmapMetadata(prefix, &decoded).error_code,
+              UHDR_CODEC_OK);
+  }
+}
+
+TEST_F(GainMapMetadataTest, ExtremeInt32AndUint32Roundtrip) {
+  uhdr_gainmap_metadata_frac frac = singleEqualDenominators();
+  frac.baseHdrHeadroomN = UINT32_MAX;
+  frac.baseHdrHeadroomD = UINT32_MAX;
+  frac.alternateHdrHeadroomN = UINT32_MAX;
+  frac.alternateHdrHeadroomD = UINT32_MAX;
+  for (size_t c = 0; c < 3; ++c) {
+    frac.gainMapMinN[c] = INT32_MIN;
+    frac.gainMapMinD[c] = UINT32_MAX;
+    frac.gainMapMaxN[c] = INT32_MAX;
+    frac.gainMapMaxD[c] = UINT32_MAX;
+    frac.gainMapGammaN[c] = UINT32_MAX;
+    frac.gainMapGammaD[c] = UINT32_MAX;
+    frac.baseOffsetN[c] = INT32_MIN;
+    frac.baseOffsetD[c] = UINT32_MAX;
+    frac.alternateOffsetN[c] = INT32_MAX;
+    frac.alternateOffsetD[c] = UINT32_MAX;
+  }
+
+  std::vector<uint8_t> encoded;
+  ASSERT_EQ(uhdr_gainmap_metadata_frac::encodeGainmapMetadata(&frac, encoded).error_code,
+            UHDR_CODEC_OK);
+  uhdr_gainmap_metadata_frac decoded;
+  ASSERT_EQ(uhdr_gainmap_metadata_frac::decodeGainmapMetadata(encoded, &decoded).error_code,
+            UHDR_CODEC_OK);
+  EXPECT_EQ(decoded.baseHdrHeadroomN, UINT32_MAX);
+  EXPECT_EQ(decoded.gainMapMinN[0], INT32_MIN);
+  EXPECT_EQ(decoded.gainMapMaxN[0], INT32_MAX);
+  EXPECT_EQ(decoded.gainMapGammaN[0], UINT32_MAX);
+}
+
 }  // namespace ultrahdr
